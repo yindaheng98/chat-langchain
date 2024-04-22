@@ -29,10 +29,9 @@ import { apiBaseUrl } from "../utils/constants";
 
 const MODEL_TYPES = [
   "openai_gpt_3_5_turbo",
-  "anthropic_claude_3_sonnet",
-  "google_gemini_pro",
-  "fireworks_mixtral",
-  "cohere_command",
+  "openai_gpt_4_turbo",
+  "openai_gpt_4",
+  "openai_gpt_4_32k",
 ];
 
 const defaultLlmValue =
