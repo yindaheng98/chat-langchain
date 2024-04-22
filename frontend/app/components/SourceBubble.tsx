@@ -5,6 +5,7 @@ import { sendFeedback } from "../utils/sendFeedback";
 export type Source = {
   url: string;
   title: string;
+  date: string;
 };
 
 export function SourceBubble({
@@ -43,7 +44,7 @@ export function SourceBubble({
     >
       <CardBody>
         <Heading size={"sm"} fontWeight={"normal"} color={"white"}>
-          {source.title}
+          ({source.date}){source.title}
         </Heading>
       </CardBody>
     </Card>
