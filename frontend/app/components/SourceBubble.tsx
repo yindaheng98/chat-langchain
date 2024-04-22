@@ -44,7 +44,7 @@ export function SourceBubble({
     >
       <CardBody>
         <Heading size={"sm"} fontWeight={"normal"} color={"white"}>
-          ({source.date}){source.title}
+          ({source.date}) {source.title}
         </Heading>
       </CardBody>
     </Card>
