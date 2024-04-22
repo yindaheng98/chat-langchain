@@ -2,14 +2,6 @@ import os
 from operator import itemgetter
 from typing import Dict, List, Optional, Sequence
 
-import weaviate
-from constants import WEAVIATE_DOCS_INDEX_NAME
-from fastapi import FastAPI
-from fastapi.middleware.cors import CORSMiddleware
-from ingest import get_embeddings_model
-from langchain_anthropic import ChatAnthropic
-from langchain_community.chat_models import ChatCohere
-from langchain_community.vectorstores import Weaviate
 from langchain_core.documents import Document
 from langchain_core.language_models import LanguageModelLike
 from langchain_core.messages import AIMessage, HumanMessage
@@ -30,10 +22,8 @@ from langchain_core.runnables import (
     RunnableSequence,
     chain,
 )
-from langchain_fireworks import ChatFireworks
-from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain_openai import ChatOpenAI
-from langsmith import Client
+from langchain_community.retrievers import ChatGPTPluginRetriever
 
 RESPONSE_TEMPLATE = """\
 You are an expert programmer and problem-solver, tasked with answering any question \
@@ -104,21 +94,8 @@ Follow Up Input: {question}
 Standalone Question:"""
 
 
-client = Client()
-
-app = FastAPI()
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-    expose_headers=["*"],
-)
-
-
-WEAVIATE_URL = os.environ["WEAVIATE_URL"]
-WEAVIATE_API_KEY = os.environ["WEAVIATE_API_KEY"]
+CHATGPTPLUGIN_URL = os.environ["CHATGPTPLUGIN_URL"]
+CHATGPTPLUGIN_BEARER = os.environ["CHATGPTPLUGIN_BEARER"]
 
 
 class ChatRequest(BaseModel):
@@ -127,19 +104,7 @@ class ChatRequest(BaseModel):
 
 
 def get_retriever() -> BaseRetriever:
-    weaviate_client = weaviate.Client(
-        url=WEAVIATE_URL,
-        auth_client_secret=weaviate.AuthApiKey(api_key=WEAVIATE_API_KEY),
-    )
-    weaviate_client = Weaviate(
-        client=weaviate_client,
-        index_name=WEAVIATE_DOCS_INDEX_NAME,
-        text_key="text",
-        embedding=get_embeddings_model(),
-        by_text=False,
-        attributes=["source", "title"],
-    )
-    return weaviate_client.as_retriever(search_kwargs=dict(k=6))
+    return ChatGPTPluginRetriever(url=CHATGPTPLUGIN_URL, bearer_token=CHATGPTPLUGIN_BEARER)
 
 
 def create_retriever_chain(
@@ -214,18 +179,13 @@ def create_chain(llm: LanguageModelLike, retriever: BaseRetriever) -> Runnable:
         ]
     )
 
-    @chain
-    def cohere_response_synthesizer(input: dict) -> RunnableSequence:
-        return cohere_prompt | llm.bind(source_documents=input["docs"])
-
     response_synthesizer = (
         default_response_synthesizer.configurable_alternatives(
             ConfigurableField("llm"),
             default_key="openai_gpt_3_5_turbo",
-            anthropic_claude_3_sonnet=default_response_synthesizer,
-            fireworks_mixtral=default_response_synthesizer,
-            google_gemini_pro=default_response_synthesizer,
-            cohere_command=cohere_response_synthesizer,
+            openai_gpt_4_turbo=default_response_synthesizer,
+            openai_gpt_4=default_response_synthesizer,
+            openai_gpt_4_32k=default_response_synthesizer,
         )
         | StrOutputParser()
     ).with_config(run_name="GenerateResponse")
@@ -237,41 +197,18 @@ def create_chain(llm: LanguageModelLike, retriever: BaseRetriever) -> Runnable:
 
 
 gpt_3_5 = ChatOpenAI(model="gpt-3.5-turbo-0125", temperature=0, streaming=True)
-claude_3_sonnet = ChatAnthropic(
-    model="claude-3-sonnet-20240229",
-    temperature=0,
-    max_tokens=4096,
-    anthropic_api_key=os.environ.get("ANTHROPIC_API_KEY", "not_provided"),
-)
-fireworks_mixtral = ChatFireworks(
-    model="accounts/fireworks/models/mixtral-8x7b-instruct",
-    temperature=0,
-    max_tokens=16384,
-    fireworks_api_key=os.environ.get("FIREWORKS_API_KEY", "not_provided"),
-)
-gemini_pro = ChatGoogleGenerativeAI(
-    model="gemini-pro",
-    temperature=0,
-    max_tokens=16384,
-    convert_system_message_to_human=True,
-    google_api_key=os.environ.get("GOOGLE_API_KEY", "not_provided"),
-)
-cohere_command = ChatCohere(
-    model="command",
-    temperature=0,
-    cohere_api_key=os.environ.get("COHERE_API_KEY", "not_provided"),
-)
+gpt_4_turbo = ChatOpenAI(model="gpt-4-turbo-2024-04-09", temperature=0, streaming=True)
+gpt_4 = ChatOpenAI(model="gpt-4", temperature=0, streaming=True)
+gpt_4_32k = ChatOpenAI(model="gpt-4-32k", temperature=0, streaming=True)
+
 llm = gpt_3_5.configurable_alternatives(
     # This gives this field an id
     # When configuring the end runnable, we can then use this id to configure this field
     ConfigurableField(id="llm"),
     default_key="openai_gpt_3_5_turbo",
-    anthropic_claude_3_sonnet=claude_3_sonnet,
-    fireworks_mixtral=fireworks_mixtral,
-    google_gemini_pro=gemini_pro,
-    cohere_command=cohere_command,
-).with_fallbacks(
-    [gpt_3_5, claude_3_sonnet, fireworks_mixtral, gemini_pro, cohere_command]
+    openai_gpt_4_turbo=gpt_4_turbo,
+    openai_gpt_4=gpt_4,
+    openai_gpt_4_32k=gpt_4_32k,
 )
 
 retriever = get_retriever()
